@@ -2505,10 +2505,14 @@ class TileRenderer {
 class LandingMarker {
   static _el = null;
 
-  static show(tileId, playerColor) {
-    LandingMarker.clear();
+  static show(tileId, playerColor, isRemoteSync = false) {
+    LandingMarker.clear(isRemoteSync);
     const tileEl = BoardRenderer.tileEls[tileId];
     if (!tileEl) return;
+
+    if (PeerManager.active && PeerManager.isHost && !isRemoteSync) {
+      PeerManager.broadcast({ type: 'SHOW_MARKER', tileId, playerColor });
+    }
 
     const canvas = document.getElementById('board-canvas');
     const el = document.createElement('div');
@@ -2526,7 +2530,10 @@ class LandingMarker {
     LandingMarker._el = el;
   }
 
-  static clear() {
+  static clear(isRemoteSync = false) {
+    if (PeerManager.active && PeerManager.isHost && !isRemoteSync) {
+      PeerManager.broadcast({ type: 'CLEAR_MARKER' });
+    }
     if (LandingMarker._el) {
       LandingMarker._el.remove();
       LandingMarker._el = null;
@@ -3472,7 +3479,6 @@ class MovementEngine {
     UIManager.updateAllHUDs();
     GameState.updateRanks();
     UIManager.updateAllHUDs();
-    btn.disabled = false;
   }
 
   // Teleport (no step events, only land event)
@@ -5168,21 +5174,58 @@ class UIManager {
 
   static showChancePopup(player, card, eff) {
     return new Promise(res => {
+      // Multiplayer: host requests decision from remote player
+      if (PeerManager.active && PeerManager.isHost && player && !PeerManager.isLocalPlayer(player.id)) {
+        PeerManager.requestDecision(player.id, { type: 'chance', text: card.text }).then(() => {
+          PeerManager.broadcastState();
+          res();
+        });
+        return;
+      }
+
       const backdrop = document.getElementById('overlay-backdrop');
       const popup    = document.getElementById('main-popup');
       backdrop.classList.add('visible');
+
+      const hasCountdown = !player.isRobot && (PeerManager.active || UIManager._buyCardSendMode);
       popup.innerHTML = `
         <div class="popup-icon">❓</div>
         <div class="popup-title">${player.emoji} ${player.name} dapat Kartu!</div>
         <div class="chance-card">
           <div class="chance-card-text">${card.text}</div>
         </div>
-        ${player.isRobot ? '' : `<div class="popup-actions"><button class="btn-buy" id="pop-ok">Mengerti!</button></div>`}
+        ${player.isRobot ? '' : `
+          <div class="popup-actions"><button class="btn-buy" id="pop-ok">Mengerti!</button></div>
+          ${hasCountdown ? `
+            <div class="decision-countdown">
+              <div class="dc-bar"><div class="dc-fill" style="width:100%"></div></div>
+              <span class="dc-secs">20</span>
+            </div>
+          ` : ''}
+        `}
       `;
+
       if (player.isRobot) {
         setTimeout(() => { backdrop.classList.remove('visible'); res(); }, 2000);
       } else {
+        let stopChanceTimer = () => {};
+        if (hasCountdown) {
+          stopChanceTimer = startCountdown(20, popup, () => {
+            if (UIManager._buyCardSendMode) {
+              UIManager._buyCardResolve({ choice: 'ok' });
+              UIManager._buyCardSendMode = false;
+            }
+            backdrop.classList.remove('visible');
+            res();
+          });
+        }
+
         document.getElementById('pop-ok').onclick = () => {
+          stopChanceTimer();
+          if (UIManager._buyCardSendMode) {
+            UIManager._buyCardResolve({ choice: 'ok' });
+            UIManager._buyCardSendMode = false;
+          }
           backdrop.classList.remove('visible');
           res();
         };
@@ -5545,7 +5588,11 @@ async function handleRollWithDice(p, d1, d2) {
   if (result.isDoubles && !p.inJail) {
     showToast(`🎉 ${p.name} giliran lagi!`, 'golden');
     UIManager.addLog(`🎉 ${p.name} dadu kembar — giliran lagi!`);
-    btn.disabled = false;
+    if (PeerManager.active) {
+      btn.disabled = !PeerManager.isLocalPlayer(p.id);
+    } else {
+      btn.disabled = false;
+    }
     if (PeerManager.active && PeerManager.isHost) {
       PeerManager.broadcastState();
     }
@@ -5837,6 +5884,12 @@ class PeerManager {
     if (msg.type === 'TELEPORT_TOKEN') {
       const p = GameState.players[msg.playerId];
       if (p) MovementEngine.teleport(p, msg.tileId, true);
+    }
+    if (msg.type === 'SHOW_MARKER') {
+      LandingMarker.show(msg.tileId, msg.playerColor, true);
+    }
+    if (msg.type === 'CLEAR_MARKER') {
+      LandingMarker.clear(true);
     }
     if (msg.type === 'LOG') {
       const log = document.getElementById('game-log');

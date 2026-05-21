@@ -1090,6 +1090,12 @@
     padding: 5px 10px; margin-bottom: 10px; line-height: 1.4;
   }
   .bc-group-hint b { color: #ffd700; }
+  .decision-countdown { display: flex; align-items: center; gap: 7px; padding: 4px 10px 6px; }
+  .dc-bar  { flex: 1; height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
+  .dc-fill { height: 100%; background: #ffd700; border-radius: 2px; transition: width 1s linear, background 0.5s; }
+  .dc-fill.urgent { background: #ff5252; }
+  .dc-secs { min-width: 22px; text-align: right; font-size: 11px; font-family: 'Nunito', sans-serif; font-weight: 700; color: rgba(255,215,0,0.7); }
+  .dc-secs.urgent { color: #ff5252; }
 
   /* ===== INLINE SELL CARD ===== */
   #sell-card {
@@ -2655,6 +2661,7 @@ class GameState {
   static isAnimating   = false;
   static worldCupResolve   = null;
   static worldCupAllowedIds = [];
+  static _worldCupTimer    = null;
 
   static init(players) {
     GameState.players = players;
@@ -4033,6 +4040,7 @@ class BoardRenderer {
     // World Cup selection mode
     if (GameState.worldCupResolve && !GameState.isAnimating) {
       if (GameState.worldCupAllowedIds.includes(tileId)) {
+        if (GameState._worldCupTimer) { GameState._worldCupTimer(); GameState._worldCupTimer = null; }
         const resolveFn = GameState.worldCupResolve;
         GameState.worldCupResolve = null;
         GameState.worldCupAllowedIds = [];
@@ -4334,6 +4342,10 @@ class UIManager {
           }).join('')}
         </div>
         <div class="bc-balance">Saldo: <strong>Rp ${fmt(player.cash)}</strong></div>
+        <div class="decision-countdown">
+          <div class="dc-bar"><div class="dc-fill" style="width:100%"></div></div>
+          <span class="dc-secs">20</span>
+        </div>
       `;
 
       // Position card near the tile, avoiding screen edges
@@ -4353,7 +4365,9 @@ class UIManager {
 
       card.classList.add('visible');
 
+      let stopBuyTimer = () => {};
       const doFinish = (lvl) => {
+        stopBuyTimer();
         let ok, b;
         if (lvl === 0) {
           ok = GameState.buyProperty(player, tile.id);
@@ -4374,7 +4388,13 @@ class UIManager {
         res();
       };
 
-      document.getElementById('bc-close-btn').onclick = () => { card.classList.remove('visible'); res(); };
+      stopBuyTimer = startCountdown(20, card, () => {
+        showToast('⏱ Waktu habis — dilewati', 'bad');
+        card.classList.remove('visible');
+        res();
+      });
+
+      document.getElementById('bc-close-btn').onclick = () => { stopBuyTimer(); card.classList.remove('visible'); res(); };
       card.querySelectorAll('.bc-option').forEach(btn => {
         btn.onclick = () => doFinish(parseInt(btn.dataset.lvl));
       });
@@ -4433,10 +4453,21 @@ class UIManager {
         <div class="popup-actions" style="margin-top:10px">
           <button class="btn-skip" id="pop-skip">Nanti</button>
         </div>
+        <div class="decision-countdown">
+          <div class="dc-bar"><div class="dc-fill" style="width:100%"></div></div>
+          <span class="dc-secs">20</span>
+        </div>
       `;
+
+      const stopUpgTimer = startCountdown(20, popup, () => {
+        showToast('⏱ Waktu habis — dilewati', 'bad');
+        backdrop.classList.remove('visible');
+        res();
+      });
 
       popup.querySelectorAll('.btn-build-lvl').forEach(btn => {
         btn.onclick = () => {
+          stopUpgTimer();
           const targetLvl = parseInt(btn.dataset.lvl);
           const ok = GameState.upgradeBuildingToLevel(player, tile.id, targetLvl);
           const b  = BUILDINGS[targetLvl];
@@ -4453,6 +4484,7 @@ class UIManager {
         };
       });
       document.getElementById('pop-skip').onclick = () => {
+        stopUpgTimer();
         backdrop.classList.remove('visible');
         res();
       };
@@ -4474,8 +4506,18 @@ class UIManager {
           <button class="btn-buy" id="pop-landmark">🏰 Bangun Landmark</button>
           <button class="btn-skip" id="pop-skip">Nanti</button>
         </div>
+        <div class="decision-countdown">
+          <div class="dc-bar"><div class="dc-fill" style="width:100%"></div></div>
+          <span class="dc-secs">20</span>
+        </div>
       `;
+      const stopLmTimer = startCountdown(20, popup, () => {
+        showToast('⏱ Waktu habis — dilewati', 'bad');
+        backdrop.classList.remove('visible');
+        res();
+      });
       document.getElementById('pop-landmark').onclick = () => {
+        stopLmTimer();
         const ok = GameState.upgradeBuildingToLevel(player, tile.id, 4);
         if (ok) {
           showToast('🏰 Landmark dibangun!', 'golden');
@@ -4488,7 +4530,7 @@ class UIManager {
         backdrop.classList.remove('visible');
         res();
       };
-      document.getElementById('pop-skip').onclick = () => { backdrop.classList.remove('visible'); res(); };
+      document.getElementById('pop-skip').onclick = () => { stopLmTimer(); backdrop.classList.remove('visible'); res(); };
     });
   }
 
@@ -4558,7 +4600,28 @@ class UIManager {
       popup.innerHTML = `
         <span style="font-size:18px; margin-right:8px;">🏆</span>
         <span>PIALA DUNIA: Silakan klik kota yang di-highlight pada papan!</span>
+        <div class="decision-countdown" style="margin-top:6px;width:100%">
+          <div class="dc-bar"><div class="dc-fill" style="width:100%"></div></div>
+          <span class="dc-secs">20</span>
+        </div>
       `;
+
+      GameState._worldCupTimer = startCountdown(20, popup, () => {
+        if (!GameState.worldCupResolve) return; // already resolved by click
+        const autoId = allowedIds[Math.floor(Math.random() * allowedIds.length)];
+        const resolveFn = GameState.worldCupResolve;
+        GameState.worldCupResolve = null;
+        GameState.worldCupAllowedIds = [];
+        BoardRenderer.clearWorldCupHighlights();
+        backdrop.classList.remove('visible', 'non-modal');
+        popup.className = 'popup';
+        GameState.doubleMultiplier(autoId);
+        BoardRenderer.renderTileOwner(autoId);
+        const autoTile = BOARD_TILES[autoId];
+        showToast(`⏱ Auto-pilih ${autoTile.name} — toll ×${GameState.tileMultiplier[autoId] || 1}!`, 'bad');
+        UIManager.addLog(`⏱ Waktu habis! ${player.name} auto-pilih ${autoTile.name}`);
+        resolveFn();
+      });
     });
   }
 
@@ -4968,6 +5031,20 @@ function fmtShort(n) {
 }
 function rankStr(r) { return ['1st','2nd','3rd','4th'][r-1] || `${r}th`; }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function startCountdown(seconds, container, onExpire) {
+  const barEl  = container.querySelector('.dc-fill');
+  const secsEl = container.querySelector('.dc-secs');
+  let rem = seconds;
+  const update = () => {
+    const pct = rem / seconds * 100;
+    if (barEl)  { barEl.style.width = pct + '%'; barEl.classList.toggle('urgent', rem <= 5); }
+    if (secsEl) { secsEl.textContent = rem; secsEl.classList.toggle('urgent', rem <= 5); }
+  };
+  update();
+  const id = setInterval(() => { rem--; update(); if (rem <= 0) { clearInterval(id); onExpire(); } }, 1000);
+  return () => clearInterval(id);
+}
 
 function showToast(text, type = 'neutral') {
   const area  = document.getElementById('toast-area');

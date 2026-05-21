@@ -845,6 +845,23 @@
     100% { left: 200%; }
   }
 
+  #roll-timer-bar {
+    width: 0;
+    height: 4px;
+    border-radius: 0 0 30px 30px;
+    background: linear-gradient(90deg, #00e676, #ffd700);
+    transition: width 1s linear, background 1s;
+    margin-top: -2px;
+    pointer-events: none;
+  }
+  #roll-timer-bar.urgent { background: linear-gradient(90deg, #ff5252, #ff9800); }
+  #roll-timer-lbl {
+    font-size: 11px; font-family: 'Nunito', sans-serif; font-weight: 700;
+    color: rgba(255,215,0,0.7); min-height: 14px; text-align: center;
+    transition: color 0.5s;
+  }
+  #roll-timer-lbl.urgent { color: #ff5252; }
+
   #dice-result-msg {
     font-family: 'Fredoka One', cursive;
     font-size: 14px;
@@ -2033,6 +2050,8 @@
     </div>
     <div id="dice-result-msg">Roll the dice!</div>
     <button id="roll-btn">🎲 ROLL DICE</button>
+    <div id="roll-timer-bar"></div>
+    <div id="roll-timer-lbl"></div>
   </div>
 
   <!-- ===== TURN INDICATOR ===== -->
@@ -2669,6 +2688,7 @@ class GameState {
   static worldCupResolve   = null;
   static worldCupAllowedIds = [];
   static _worldCupTimer    = null;
+  static _autoRolled       = false;
 
   static init(players) {
     GameState.players = players;
@@ -2692,6 +2712,7 @@ class GameState {
       return;
     }
 
+    GameState._autoRolled = false;
     GameState.currentPlayer = (GameState.currentPlayer + 1) % GameState.players.length;
     // Skip bankrupt players
     let safety = 0;
@@ -4360,6 +4381,13 @@ class UIManager {
       (async () => {
       const firstLap = player.laps === 0;
 
+      // Auto-rolled: skip buy popup
+      if (GameState._autoRolled) {
+        GameState._autoRolled = false;
+        showToast('⏱ Auto-roll — tidak bisa beli properti', 'bad');
+        return res();
+      }
+
       // Robot logic
       if (player.isRobot) {
         const targetLvl = firstLap ? 0 : (player.cash > tile.price * 3 ? Math.min(3, 2) : 0);
@@ -5437,6 +5465,48 @@ function toggleAuto(playerId) {
   UIManager.updateAllHUDs();
 }
 
+// ── Roll auto-timer for human players ───────────────────────
+let _rollTimerId   = null;
+let _rollTimerSecs = 0;
+const ROLL_TIMEOUT = 10;
+
+function clearRollTimer() {
+  if (_rollTimerId) { clearInterval(_rollTimerId); _rollTimerId = null; }
+  const bar = document.getElementById('roll-timer-bar');
+  const lbl = document.getElementById('roll-timer-lbl');
+  if (bar) { bar.style.width = '0'; bar.classList.remove('urgent'); }
+  if (lbl) { lbl.textContent = ''; lbl.classList.remove('urgent'); }
+}
+
+function startRollTimer() {
+  clearRollTimer();
+  const btn = document.getElementById('roll-btn');
+  const bar = document.getElementById('roll-timer-bar');
+  const lbl = document.getElementById('roll-timer-lbl');
+  if (!btn || btn.disabled || btn.style.display === 'none') return;
+
+  _rollTimerSecs = ROLL_TIMEOUT;
+  const btnWidth = btn.offsetWidth || 180;
+  const update = () => {
+    const pct = (_rollTimerSecs / ROLL_TIMEOUT) * 100;
+    const urgent = _rollTimerSecs <= 3;
+    if (bar) { bar.style.width = (btnWidth * pct / 100) + 'px'; bar.classList.toggle('urgent', urgent); }
+    if (lbl) { lbl.textContent = `Auto-roll in ${_rollTimerSecs}s`; lbl.classList.toggle('urgent', urgent); }
+  };
+  update();
+  _rollTimerId = setInterval(() => {
+    _rollTimerSecs--;
+    update();
+    if (_rollTimerSecs <= 0) {
+      clearRollTimer();
+      if (!GameState.isAnimating && !GameState.gameOver) {
+        GameState._autoRolled = true;
+        handleRoll();
+      }
+    }
+  }, 1000);
+}
+
 function scheduleRobotTurn() {
   if (PeerManager.active && !PeerManager.isHost) return;
 
@@ -5464,6 +5534,9 @@ function scheduleRobotTurn() {
         handleRoll();
       }
     }, delay);
+  } else {
+    // Human player — start 10s auto-roll countdown
+    startRollTimer();
   }
 }
 
@@ -5472,6 +5545,7 @@ function scheduleRobotTurn() {
 // ============================================================
 async function handleRoll(fixedD1 = null, fixedD2 = null) {
   if (GameState.isAnimating || GameState.gameOver) return;
+  clearRollTimer();
 
   const p   = GameState.currentP();
   const btn = document.getElementById('roll-btn');

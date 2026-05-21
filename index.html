@@ -6156,7 +6156,29 @@ function showCardPickCeremony(configs, cardValues) {
       }
     }
 
-    // Kick off
+    // Multiplayer: deterministic auto-reveal (player i always gets card i)
+    // so all devices compute identical results from the shared cardValues.
+    if (PeerManager.active) {
+      instrEl.textContent = '🎴 Mengungkap kartu takdir...';
+      instrEl.style.opacity = '1';
+      for (let i = 0; i < N; i++) {
+        picked[i] = i; // player i → card slot i
+        taken[i]  = true;
+        setTimeout(() => {
+          const cardEl = cardsEl.children[i]?.querySelector('.cp-card');
+          if (cardEl) cardEl.classList.add('flipped');
+          const lbl = document.getElementById(`cp-lbl-${i}`);
+          if (lbl) {
+            lbl.innerHTML = `<span class="cp-player-emoji">${configs[i].emoji}</span> ${configs[i].name}`;
+            lbl.style.color = configs[i].color || '#fff';
+          }
+        }, i * 650 + 400);
+      }
+      setTimeout(cpShowResults, N * 650 + 1200);
+      return;
+    }
+
+    // Local play: interactive picking
     cpUpdateInstruction();
     cpScheduleRobot();
   });

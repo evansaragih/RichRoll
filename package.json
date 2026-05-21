@@ -1,0 +1,21 @@
+{
+  "name": "monopoly-richroll",
+  "version": "1.0.0",
+  "description": "Multiplayer Board Game",
+  "type": "module",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "agentation": "^3.0.2",
+    "vite": "^8.0.13"
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  }
+}

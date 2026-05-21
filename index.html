@@ -2939,7 +2939,7 @@ class GameState {
       : BOARD_TILES.filter(t => t.type === 'city' && t.region === tile.region);
     if (!groupTiles.every(t => GameState.tileOwner[t.id] === ownerId)) return 1;
     const built = groupTiles.filter(t => (GameState.tileBuilding[t.id] || 0) >= 1).length;
-    return (built + 1) * 2;  // x2 base for owning full group, +x2 per building
+    return built + 2;  // ×2 base for full group, +1 per tile that has a building
   }
 
   static calcTollAmount(payer, tileId) {
@@ -3898,23 +3898,26 @@ class BoardRenderer {
         const rect = tileEl.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top  + rect.height / 2;
-        const count = 16;
+        const count = 22;
         for (let i = 0; i < count; i++) {
           const p = document.createElement('div');
           const isStar = i % 4 === 0;
           p.className = 'firework-particle' + (isStar ? ' star' : '');
-          const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
-          const speed = 30 + Math.random() * 65;
+          const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+          const speed = 55 + Math.random() * 95;
+          const size  = 7 + Math.random() * 7;
           p.style.left       = cx + 'px';
           p.style.top        = cy + 'px';
+          p.style.width      = size + 'px';
+          p.style.height     = size + 'px';
           p.style.background = colors[Math.floor(Math.random() * colors.length)];
           p.style.setProperty('--fw-dx', (Math.cos(angle) * speed) + 'px');
           p.style.setProperty('--fw-dy', (Math.sin(angle) * speed) + 'px');
-          p.style.animationDelay = (Math.random() * 0.08) + 's';
+          p.style.animationDelay = (Math.random() * 0.1) + 's';
           document.body.appendChild(p);
-          setTimeout(() => p.remove(), 1100);
+          setTimeout(() => p.remove(), 1200);
         }
-      }, ti * 90);
+      }, ti * 80);
     });
   }
 
@@ -4715,6 +4718,10 @@ class UIManager {
             UIManager.addLog(`${b.icon} ${player.name} upgrade ${tile.name} → ${b.name}`);
             BoardRenderer.renderTileOwner(tile.id);
             BoardRenderer.pushBuildNotification(player, tile, b);
+            // Fireworks: landmark build
+            if (targetLvl === 4) setTimeout(() => BoardRenderer.fireworks([tile.id]), 150);
+            // Fireworks: group multiplier increase
+            groupFireworks(player, tile, 250);
           } else {
             showToast('Uang tidak cukup!', 'bad');
           }
@@ -4793,6 +4800,8 @@ class UIManager {
           UIManager.addLog(`🏰 ${player.name} bangun Landmark di ${tile.name}!`);
           BoardRenderer.renderTileOwner(tile.id);
           BoardRenderer.pushBuildNotification(player, tile, BUILDINGS[4]);
+          setTimeout(() => BoardRenderer.fireworks([tile.id]), 150);
+          groupFireworks(player, tile, 350);
         } else {
           showToast('Uang tidak cukup!', 'bad');
         }
@@ -5491,6 +5500,18 @@ function fmtShort(n) {
 }
 function rankStr(r) { return ['1st','2nd','3rd','4th'][r-1] || `${r}th`; }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Fire fireworks across a tile's whole group if the player fully owns it
+function groupFireworks(player, tile, delay = 300) {
+  const groupTiles = tile.region !== undefined
+    ? (tile.region === 8
+        ? BOARD_TILES.filter(t => isBuyable(t) && t.region === 8)
+        : BOARD_TILES.filter(t => t.type === 'city' && t.region === tile.region))
+    : [];
+  if (groupTiles.length > 0 && groupTiles.every(t => GameState.tileOwner[t.id] === player.id)) {
+    setTimeout(() => BoardRenderer.fireworks(groupTiles.map(t => t.id)), delay);
+  }
+}
 
 function startCountdown(seconds, container, onExpire) {
   const barEl  = container.querySelector('.dc-fill');

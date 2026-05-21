@@ -6123,13 +6123,12 @@ function showCardPickCeremony(configs, cardValues) {
         setTimeout(() => cpBurst(wx, wy), 300);
       }
 
-      // Resolve after showing results
+      // Resolve after showing results — just return who starts (original slot index)
       const closeDelay = N * 220 + 2200;
       setTimeout(() => {
         overlay.style.display = 'none';
-        // Return configs reordered by card value (highest first)
-        const reorderedConfigs = order.map(item => item.cfg);
-        resolve({ reorderedConfigs, originalOrder: order.map(o => o.playerIdx) });
+        // Winner's original slot = who goes first; configs stay in original order
+        resolve(order[0].playerIdx);
       }, closeDelay);
     }
 
@@ -6198,21 +6197,18 @@ async function boot(playerConfigs, cardValues) {
     cardValues = vals;
   }
 
-  const { reorderedConfigs, originalOrder } = await showCardPickCeremony(playerConfigs, cardValues);
-
-  // In multiplayer, update localSlot to reflect the new position
-  if (PeerManager.active) {
-    const origSlot = PeerManager.localSlot;
-    PeerManager.localSlot = originalOrder.indexOf(origSlot);
-  }
+  // Ceremony returns the starting player's original slot index
+  const startingSlot = await showCardPickCeremony(playerConfigs, cardValues);
 
   document.getElementById('game-root').style.display = 'flex';
 
   DiceController.renderDie(document.getElementById('die-1'), 1);
   DiceController.renderDie(document.getElementById('die-2'), 1);
 
-  const players = reorderedConfigs.map((cfg, i) => new Player(i, cfg));
+  // Keep configs in original order — only currentPlayer changes
+  const players = playerConfigs.map((cfg, i) => new Player(i, cfg));
   GameState.init(players);
+  GameState.currentPlayer = startingSlot;
 
   // Hide HUD panels that have no corresponding player
   HUD_IDS.forEach((id, i) => {
@@ -6262,7 +6258,10 @@ async function boot(playerConfigs, cardValues) {
   TimerManager.init();
 
   UIManager.addLog('🎮 Permainan dimulai! Semoga beruntung!');
-  UIManager.addLog(`🏁 ${players[0].emoji} ${players[0].name} jalan pertama`);
+  UIManager.addLog(`🏁 ${players[startingSlot].emoji} ${players[startingSlot].name} jalan pertama`);
+
+  // Broadcast initial state so clients get the correct currentPlayer immediately
+  if (PeerManager.active && PeerManager.isHost) PeerManager.broadcastState();
 
   scheduleRobotTurn();
 }

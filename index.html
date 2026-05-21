@@ -2688,7 +2688,6 @@ class GameState {
   static worldCupResolve   = null;
   static worldCupAllowedIds = [];
   static _worldCupTimer    = null;
-  static _autoRolled       = false;
 
   static init(players) {
     GameState.players = players;
@@ -2712,7 +2711,6 @@ class GameState {
       return;
     }
 
-    GameState._autoRolled = false;
     GameState.currentPlayer = (GameState.currentPlayer + 1) % GameState.players.length;
     // Skip bankrupt players
     let safety = 0;
@@ -2773,6 +2771,10 @@ class GameState {
       const isMyTurn = data.currentPlayer === PeerManager.localSlot;
       const btn = document.getElementById('roll-btn');
       if (btn) btn.disabled = !isMyTurn;
+      // Show roll timer for all human turns (auto-roll only fires if it's this client's turn)
+      const curP = GameState.players[data.currentPlayer];
+      if (curP && !curP.isRobot && !data.gameOver) startRollTimer();
+      else clearRollTimer();
     }
   }
 
@@ -4381,13 +4383,6 @@ class UIManager {
       (async () => {
       const firstLap = player.laps === 0;
 
-      // Auto-rolled: skip buy popup
-      if (GameState._autoRolled) {
-        GameState._autoRolled = false;
-        showToast('⏱ Auto-roll — tidak bisa beli properti', 'bad');
-        return res();
-      }
-
       // Robot logic
       if (player.isRobot) {
         const targetLvl = firstLap ? 0 : (player.cash > tile.price * 3 ? Math.min(3, 2) : 0);
@@ -5483,7 +5478,7 @@ function startRollTimer() {
   const btn = document.getElementById('roll-btn');
   const bar = document.getElementById('roll-timer-bar');
   const lbl = document.getElementById('roll-timer-lbl');
-  if (!btn || btn.disabled || btn.style.display === 'none') return;
+  if (!btn) return;
 
   _rollTimerSecs = ROLL_TIMEOUT;
   const btnWidth = btn.offsetWidth || 180;
@@ -5499,8 +5494,9 @@ function startRollTimer() {
     update();
     if (_rollTimerSecs <= 0) {
       clearRollTimer();
-      if (!GameState.isAnimating && !GameState.gameOver) {
-        GameState._autoRolled = true;
+      // Only auto-roll if this device controls the current player
+      const isMyTurn = PeerManager.isLocalPlayer(GameState.currentPlayer);
+      if (!GameState.isAnimating && !GameState.gameOver && isMyTurn) {
         handleRoll();
       }
     }

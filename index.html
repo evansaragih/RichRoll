@@ -3614,14 +3614,21 @@ class MovementEngine {
         GameState.checkBankruptcy(player);
         await UIManager.showTollPopup(player, tile, paid);
 
-        // Buyout option (only if building level < 4, buyer is not bankrupt, owner is different, and player can afford it)
+        // Buyout / takeover option — available on all buyable tiles (city, airport, landmark-type)
+        // as long as building level < 4 (not yet a landmark building), not bankrupt, not a teammate
         const lvl = GameState.tileBuilding[tile.id] !== undefined ? GameState.tileBuilding[tile.id] : 0;
         const owner = GameState.players[ownerId];
         const cost = tile.price * 2;
         const isTeammate = player.team && owner.team && player.team === owner.team;
 
-        if (!player.bankrupt && lvl < 4 && !isTeammate && player.cash >= cost) {
-          await UIManager.showBuyoutPopup(player, owner, tile, cost);
+        if (!player.bankrupt && lvl < 4 && !isTeammate && player.totalAssets >= cost) {
+          // Offer to sell assets first if cash is short
+          if (!player.isRobot && player.cash < cost && player.properties.length > 0) {
+            await UIManager.showSellPanel(player, cost - player.cash);
+          }
+          if (player.cash >= cost) {
+            await UIManager.showBuyoutPopup(player, owner, tile, cost);
+          }
         }
       }
     }

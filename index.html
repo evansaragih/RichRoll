@@ -2747,11 +2747,11 @@ class GameState {
     UIManager.updateAllHUDs();
     UIManager.updateCenterHUD();
     UIManager.updateTurnIndicator();
-    // Disable roll on client if it's not their turn
+    // Enable/disable roll button based on whose turn it is
     if (PeerManager.active && !PeerManager.isHost) {
       const isMyTurn = data.currentPlayer === PeerManager.localSlot;
       const btn = document.getElementById('roll-btn');
-      if (btn && !isMyTurn) btn.disabled = true;
+      if (btn) btn.disabled = !isMyTurn;
     }
   }
 
@@ -5674,7 +5674,7 @@ function boot(playerConfigs) {
     }
   });
 
-  document.getElementById('roll-btn').addEventListener('click', handleRoll);
+  document.getElementById('roll-btn').addEventListener('click', () => handleRoll());
 
   UIManager.updateAllHUDs();
   UIManager.updateCenterHUD();

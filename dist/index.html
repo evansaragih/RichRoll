@@ -2695,6 +2695,9 @@ class GameState {
     UIManager.updateAllHUDs();
     UIManager.updateCenterHUD();
     UIManager.updateTurnIndicator();
+    if (PeerManager.active && PeerManager.isHost) {
+      PeerManager.broadcastState();
+    }
     scheduleRobotTurn();
   }
 
@@ -4110,7 +4113,7 @@ class BoardRenderer {
       if (PeerManager.active && !PeerManager.isHost) {
         p.canTravel = false;
         BoardRenderer.clearTravelHighlights();
-        PeerManager.sendToHost({ type: 'DECISION_RES', choice: 'travel', tileId: tileId });
+        PeerManager.sendToHost({ type: 'CLIENT_TRAVEL', tileId: tileId });
         return;
       }
       p.canTravel = false;
@@ -5392,59 +5395,66 @@ function toggleAuto(playerId) {
 }
 
 function scheduleRobotTurn() {
+  if (PeerManager.active && !PeerManager.isHost) return;
+
   const p = GameState.currentP();
-  if (!p || !p.isRobot || GameState.gameOver) return;
-  const delay = 900 + Math.random() * 600;
-  setTimeout(() => {
-    if (GameState.currentP()?.isRobot && !GameState.isAnimating && !GameState.gameOver) {
-      handleRoll();
-    }
-  }, delay);
+  if (!p || GameState.gameOver) return;
+
+  // Auto-skip turns on Host
+  if (p.skipTurn) {
+    setTimeout(() => {
+      if (GameState.currentP() === p && !GameState.isAnimating && !GameState.gameOver) {
+        p.skipTurn = false;
+        UIManager.addLog(`😴 ${p.name} skips turn`);
+        showToast(`${p.emoji} ${p.name} skips turn`, 'neutral');
+        GameState.nextTurn();
+        PeerManager.broadcastState();
+      }
+    }, 1000);
+    return;
+  }
+
+  if (p.isRobot) {
+    const delay = 900 + Math.random() * 600;
+    setTimeout(() => {
+      if (GameState.currentP()?.isRobot && !GameState.isAnimating && !GameState.gameOver) {
+        handleRoll();
+      }
+    }, delay);
+  }
 }
 
 // ============================================================
 //  ROLL HANDLER — main game turn flow
 // ============================================================
-async function handleRoll() {
+async function handleRoll(fixedD1 = null, fixedD2 = null) {
   if (GameState.isAnimating || GameState.gameOver) return;
 
   const p   = GameState.currentP();
   const btn = document.getElementById('roll-btn');
 
-  // Gating: clients do not execute main loop locally
+  // Gating: clients do not execute main loop locally, they initiate local roll and notify Host
   if (PeerManager.active && !PeerManager.isHost) {
-    return;
-  }
-
-  // Multiplayer: host waits for remote (non-robot) player decision
-  if (PeerManager.active && PeerManager.isHost && !PeerManager.isLocalPlayer(p.id) && !p.isRobot) {
-    btn.disabled = true;
-    if (p.canTravel) {
-      const resp = await PeerManager.requestDecision(p.id, { type: 'travel', currentPos: p.position });
-      if (resp.choice === 'travel' && resp.tileId !== undefined) {
-        p.canTravel = false;
-        await MovementEngine.teleport(p, resp.tileId);
-        UIManager.updateAllHUDs();
-        GameState.updateRanks();
-        UIManager.updateAllHUDs();
-        GameState.nextTurn();
-        PeerManager.broadcastState();
-      } else {
-        p.canTravel = false;
-        GameState.nextTurn();
-        PeerManager.broadcastState();
+    const isMyTurn = PeerManager.isLocalPlayer(p.id);
+    if (isMyTurn) {
+      if (p.canTravel) {
+        BoardRenderer.highlightTravelTiles(p.position);
+        showToast('✈ Klik blok tujuan!', 'neutral');
+        return;
       }
-      return;
+      btn.disabled = true;
+      const d1 = Math.ceil(Math.random() * 6);
+      const d2 = Math.ceil(Math.random() * 6);
+      
+      // Roll locally immediately for visual feedback
+      DiceController.roll(d1, d2);
+      
+      PeerManager.sendToHost({ type: 'CLIENT_ROLL', d1, d2 });
     }
-    const resp = await PeerManager.requestDecision(p.id, { type: 'roll' });
-    if (resp.choice !== 'roll' || !resp.d1) { GameState.nextTurn(); return; }
-    // Use remote dice values — run full turn logic with them
-    await handleRollWithDice(p, resp.d1, resp.d2);
-    PeerManager.broadcastState();
     return;
   }
 
-  // Travel mode
+  // Travel mode (only for local human players or AI robots on Host)
   if (p.canTravel) {
     if (p.isRobot) {
       // Bot picks an unowned city first, else any tile except current
@@ -5458,6 +5468,7 @@ async function handleRoll() {
       GameState.updateRanks();
       UIManager.updateAllHUDs();
       GameState.nextTurn();
+      PeerManager.broadcastState();
       return;
     }
     BoardRenderer.highlightTravelTiles(p.position);
@@ -5471,12 +5482,13 @@ async function handleRoll() {
     UIManager.addLog(`😴 ${p.name} skips turn`);
     showToast(`${p.emoji} ${p.name} skips turn`, 'neutral');
     GameState.nextTurn();
+    PeerManager.broadcastState();
     return;
   }
 
   // Jail logic
   if (p.inJail) {
-    const { d1, d2, isDoubles } = await DiceController.roll();
+    const { d1, d2, isDoubles } = await DiceController.roll(fixedD1, fixedD2);
     if (isDoubles) {
       p.inJail    = false;
       p.jailTurns = 0;
@@ -5497,11 +5509,12 @@ async function handleRoll() {
     }
     UIManager.updateAllHUDs();
     GameState.nextTurn();
+    PeerManager.broadcastState();
     return;
   }
 
   // Normal roll — delegate to shared helper
-  await handleRollWithDice(p, null, null);
+  await handleRollWithDice(p, fixedD1, fixedD2);
 }
 
 // Shared turn logic used by both local roll and remote roll
@@ -5512,7 +5525,7 @@ async function handleRollWithDice(p, d1, d2) {
   const destTileId = (p.position + result.sum) % TOTAL_TILES;
   LandingMarker.show(destTileId, p.color);
   await sleep(600);
-  if (result.isDoubles) {
+  if (result.isDoubles && !p.inJail) {
     p.doublesCount++;
     if (p.doublesCount >= MAX_DOUBLES) {
       p.doublesCount = 0; LandingMarker.clear();
@@ -5532,7 +5545,11 @@ async function handleRollWithDice(p, d1, d2) {
   if (result.isDoubles && !p.inJail) {
     showToast(`🎉 ${p.name} giliran lagi!`, 'golden');
     UIManager.addLog(`🎉 ${p.name} dadu kembar — giliran lagi!`);
-    btn.disabled = false; scheduleRobotTurn();
+    btn.disabled = false;
+    if (PeerManager.active && PeerManager.isHost) {
+      PeerManager.broadcastState();
+    }
+    scheduleRobotTurn();
   } else {
     GameState.nextTurn(); PeerManager.broadcastState();
   }
@@ -5721,9 +5738,10 @@ class PeerManager {
   }
 
   // ── HOST: Receive from client ───────────────────────────────
-  static _onHostMsg(fromPeer, raw) {
+  static async _onHostMsg(fromPeer, raw) {
     const msg = JSON.parse(raw);
     const slotInfo = PeerManager.connections[fromPeer];
+    if (!slotInfo) return;
 
     if (msg.type === 'JOIN') {
       const slot = slotInfo.slot;
@@ -5746,6 +5764,26 @@ class PeerManager {
         GameState.sellProperty(player, msg.tileId);
         showToast(`🏚 ${player.name} jual ${BOARD_TILES[msg.tileId].name} +Rp ${fmtShort(sp)}`, 'neutral');
         UIManager.updateAllHUDs();
+        PeerManager.broadcastState();
+      }
+    }
+    if (msg.type === 'CLIENT_ROLL') {
+      const slot = slotInfo.slot;
+      if (GameState.currentPlayer === slot) {
+        await handleRoll(msg.d1, msg.d2);
+      }
+    }
+    if (msg.type === 'CLIENT_TRAVEL') {
+      const slot = slotInfo.slot;
+      const player = GameState.players[slot];
+      if (player && GameState.currentPlayer === slot && player.canTravel) {
+        player.canTravel = false;
+        BoardRenderer.clearTravelHighlights();
+        await MovementEngine.teleport(player, msg.tileId);
+        UIManager.updateAllHUDs();
+        GameState.updateRanks();
+        UIManager.updateAllHUDs();
+        GameState.nextTurn();
         PeerManager.broadcastState();
       }
     }
@@ -5785,6 +5823,11 @@ class PeerManager {
       showToast(msg.text, msg.kind || 'neutral');
     }
     if (msg.type === 'DICE_ROLL') {
+      const p = GameState.currentP();
+      if (p && PeerManager.isLocalPlayer(p.id)) {
+        // Skip local rendering of dice roll since the local player already rolled and animated it.
+        return;
+      }
       DiceController.roll(msg.d1, msg.d2);
     }
     if (msg.type === 'MOVE_TOKEN') {
@@ -5832,21 +5875,6 @@ class PeerManager {
     const player = GameState.players[PeerManager.localSlot];
     if (!player) { PeerManager.sendToHost({ type: 'DECISION_RES', choice: 'skip' }); return; }
 
-    if (ctx.type === 'roll') {
-      showToast(`Giliran ${player.emoji} ${player.name}! Roll dadu 🎲`, 'good');
-      const btn = document.getElementById('roll-btn');
-      btn.disabled = false;
-      const origClick = btn.onclick;
-      btn.onclick = async () => {
-        btn.disabled = true;
-        btn.onclick = origClick;
-        const d1 = Math.ceil(Math.random() * 6);
-        const d2 = Math.ceil(Math.random() * 6);
-        await DiceController.roll(d1, d2);
-        PeerManager.sendToHost({ type: 'DECISION_RES', choice: 'roll', d1, d2 });
-      };
-    }
-
     if (ctx.type === 'buy') {
       const tile = BOARD_TILES[ctx.tileId];
       if (!tile) { PeerManager.sendToHost({ type: 'DECISION_RES', choice: 'skip' }); return; }
@@ -5884,12 +5912,6 @@ class PeerManager {
       UIManager._buyCardSendMode = true;
       UIManager._buyCardResolve  = (resp) => PeerManager.sendToHost({ type: 'DECISION_RES', ...resp });
       await UIManager.showStartBonusPopup(player);
-    }
-
-    if (ctx.type === 'travel') {
-      player.canTravel = true;
-      BoardRenderer.highlightTravelTiles(player.position);
-      showToast('✈ Klik blok tujuan!', 'neutral');
     }
 
     if (ctx.type === 'worldcup') {

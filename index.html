@@ -6308,11 +6308,25 @@ class PeerManager {
   }
 
   // ── HOST: Create room ──────────────────────────────────────
+  static _peerConfig() {
+    return {
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
+          { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
+          { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+        ]
+      }
+    };
+  }
+
   static createRoom(hostName, hostEmoji) {
     return new Promise((resolve, reject) => {
       const code   = Math.random().toString(36).substr(2, 6).toUpperCase();
       const peerId = `richroll1-${code}`;
-      const p      = new Peer(peerId);
+      const p      = new Peer(peerId, PeerManager._peerConfig());
       PeerManager.peer     = p;
       PeerManager.isHost   = true;
       PeerManager.roomCode = code;
@@ -6338,7 +6352,7 @@ class PeerManager {
   // ── CLIENT: Join room ──────────────────────────────────────
   static joinRoom(code, name, emoji) {
     return new Promise((resolve, reject) => {
-      const p = new Peer();
+      const p = new Peer(undefined, PeerManager._peerConfig());
       PeerManager.peer   = p;
       PeerManager.isHost = false;
       PeerManager.roomCode = code.toUpperCase();

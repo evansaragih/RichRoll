@@ -6260,10 +6260,21 @@ async function boot(playerConfigs, cardValues) {
   UIManager.addLog('🎮 Permainan dimulai! Semoga beruntung!');
   UIManager.addLog(`🏁 ${players[startingSlot].emoji} ${players[startingSlot].name} jalan pertama`);
 
-  // Broadcast initial state so clients get the correct currentPlayer immediately
-  if (PeerManager.active && PeerManager.isHost) PeerManager.broadcastState();
+  if (PeerManager.active) {
+    if (PeerManager.isHost) {
+      // Delay slightly so clients have time to finish ceremony before first STATE arrives
+      setTimeout(() => PeerManager.broadcastState(), 800);
+    } else {
+      // Disable roll until STATE confirms it's our turn
+      const btn = document.getElementById('roll-btn');
+      if (btn) btn.disabled = true;
+      // Tell host we're ready — host will send us current STATE
+      PeerManager.sendToHost({ type: 'CLIENT_READY' });
+    }
+  }
 
-  scheduleRobotTurn();
+  // Only host drives turns (robots + timers); clients just respond to STATE
+  if (!PeerManager.active || PeerManager.isHost) scheduleRobotTurn();
 }
 
 // ============================================================
@@ -6390,6 +6401,12 @@ class PeerManager {
         showToast(`🏚 ${player.name} jual ${BOARD_TILES[msg.tileId].name} +Rp ${fmtShort(sp)}`, 'neutral');
         UIManager.updateAllHUDs();
         PeerManager.broadcastState();
+      }
+    }
+    if (msg.type === 'CLIENT_READY') {
+      // Client finished ceremony and is ready — send them the current game state
+      if (GameState.players.length > 0) {
+        slotInfo.conn.send(JSON.stringify({ type: 'STATE', data: GameState.serialize() }));
       }
     }
     if (msg.type === 'CLIENT_ROLL') {

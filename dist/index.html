@@ -200,7 +200,7 @@
   .tile-side-top    .tile-top { transform: none; }
   .tile-side-left   .tile-top { transform: rotate(90deg); flex-direction: column; }
   .tile-side-left { margin-left: 22px; }
-  .tile-side-left.t-island { margin-left: 0; }
+  .tile-side-left.t-travel { margin-left: 0; }
   .t-start .tile-top, .t-travel .tile-top,
   .t-event .tile-top, .t-island .tile-top { transform: none !important; flex-direction: column !important; }
 
@@ -699,7 +699,7 @@
     font-family: 'Fredoka One', cursive;
     font-size: 55px;
     font-weight: 900;
-    font-style: italic;
+    font-style: normal;
     background: var(--hud-rank-gradient, linear-gradient(180deg, #e1e0df, #b7b4b2));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -710,7 +710,7 @@
     font-family: 'Fredoka One', cursive;
     font-size: 22px;
     font-weight: 900;
-    font-style: italic;
+    font-style: normal;
     background: var(--hud-rank-gradient, linear-gradient(180deg, #e1e0df, #b7b4b2));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -2603,8 +2603,8 @@ const BOARD_TILES = [
   { id: 6,  type: 'city',    name: 'Padang',             icon: '🍛', price: 700_000,   toll: 50_000,  region: 1 },
   { id: 7,  type: 'landmark',name: 'Raja Ampat',         icon: '🏖', price: 800_000,   toll: 80_000,  region: 8 },
 
-  // ── Corner: bottom-right (KELILING INDONESIA) ────────────────
-  { id: 8,  type: 'travel',  name: 'KELILING INDONESIA', icon: '✈',  price: 0 },
+  // ── Corner: bottom-right (TERJEBAK MACET) ───────────────────
+  { id: 8,  type: 'island',  name: 'TERJEBAK MACET',     icon: '🚗', price: 0 },
 
   // ── Right col B→T ────────────────────────────────────────────
   { id: 9,  type: 'city',    name: 'Lombok',             icon: '🌶', price: 900_000,   toll: 65_000,  region: 2 },
@@ -2627,8 +2627,8 @@ const BOARD_TILES = [
   { id: 22, type: 'city',    name: 'Gorontalo',          icon: '🐢', price: 1_900_000, toll: 135_000, region: 5 },
   { id: 23, type: 'city',    name: 'Solo',               icon: '🎭', price: 2_000_000, toll: 140_000, region: 5 },
 
-  // ── Corner: top-left (TERJEBAK MACET) ────────────────────────
-  { id: 24, type: 'island',  name: 'TERJEBAK MACET',     icon: '🚗', price: 0 },
+  // ── Corner: top-left (KELILING INDONESIA) ────────────────────
+  { id: 24, type: 'travel',  name: 'KELILING INDONESIA', icon: '✈',  price: 0 },
 
   // ── Left col T→B ─────────────────────────────────────────────
   { id: 25, type: 'landmark',name: 'Bromo',              icon: '🌋', price: 2_100_000, toll: 150_000, region: 8 },
@@ -2641,7 +2641,7 @@ const BOARD_TILES = [
 ];
 
 const TOTAL_TILES = BOARD_TILES.length; // 32
-const PULAU_ID    = BOARD_TILES.findIndex(t => t.type === 'island'); // tile 24 = TERJEBAK MACET
+const PULAU_ID    = BOARD_TILES.findIndex(t => t.type === 'island'); // tile 8 = TERJEBAK MACET
 const isBuyable = (tile) => tile.type === 'city' || tile.type === 'landmark';
 
 // Building tiers
@@ -6305,10 +6305,12 @@ function scheduleRobotTurn() {
 // ============================================================
 async function handleRoll(fixedD1 = null, fixedD2 = null) {
   if (GameState.isAnimating || GameState.gameOver) return;
+  const btn = document.getElementById('roll-btn');
+  if (btn && btn.disabled) return;
+  if (btn) btn.disabled = true;
   clearRollTimer();
 
   const p   = GameState.currentP();
-  const btn = document.getElementById('roll-btn');
 
   // Gating: clients do not execute main loop locally, they initiate local roll and notify Host
   if (PeerManager.active && !PeerManager.isHost) {
